@@ -1,0 +1,1572 @@
+---
+title: "Double sgRNAs repair"
+author: "Eva Brinkman"
+date: "20 March 2018"
+output: html_document
+---
+
+
+<h2>Description of Data</h2>
+<p>The files are the miseq reads that have been processed to indentify the insertion, deletion, wild type, point mutations in the sample. The size (score) of the indel is indicated as well. Wild type/point mutations have score=0; deletion<0, insertion>0. Point mutations have a changed nucleotide in the sgRNA target as compared to the wildtype.
+</p>
+
+<h2>Import data</h2>
+
+
+```{r variables}
+
+#which libraries are needed
+library("plyr")
+library(deSolve)
+library(minpack.lm)
+library(FME)
+library("Biostrings")
+library("seqLogo")
+
+#variables
+time_all <- c(0, 4, 8, 10, 12, 14, 16, 18, 21, 24, 33, 42, 60) #time point + shield
+time_c_all <- c(0,8,16,24,60,70) #time points -shield (t=70 is to plot -guide sample)
+
+```
+
+<h3>20161117 Run 4236</h3>
+
+|index| double sgRNA 1 | double sgRNA 2 | double sgRNA 3 |
+|:---:|:--------------:|:--------------:|:--------------:|
+|     | A              | B              | C              |
+| 1   | -guide         | sgRNA LBR8     |                |
+| 2   | sgRNA LBR2     | sgRNA LBR2+LBR8|                |
+| 3   | sgRNA LBR5     |                |sgRNA LBR2+LBR9 |
+| 4   | sgRNA LBR6     |                |                |
+| 5   | sgRNA LBR7     |                |                |
+| 6   | sgRNA LBR2+LBR5|                |                |
+| 7   | sgRNA LBR2+LBR6|                |                |
+| 8   | sgRNA LBR2+LBR7|                |                |
+
+<h3>20170102 Run 4265</h3>
+
+
+|index| LBR2 T10         | LBR2 T10 C         | LBR8 T10          | LBR2&8 T10      | LBR8_2&8 T10 C       |
+|:---:|:----------------:|:------------------:|:-----------------:|:---------------:|:--------------------:|
+|     | A                | B                  | C                 |D                |E                     |
+| 1   | T10 t=4 +shield  | T10 t=0 -shield    | T10 t=4 +shield   |T10 t=4 +shield  | T10_8 t=0 -shield    |
+| 2   | T10 t=8 +shield  | T10 t=8 -shield    | T10 t=8 +shield   |T10 t=8 +shield  | T10_8 t=8 -shield    |
+| 3   | T10 t=10 +shield | T10 t=16 -shield   | T10 t=10 +shield  |T10 t=10 +shield | T10_8 t=16 -shield   |
+| 4   | T10 t=12 +shield | T10 t=24 -shield   | T10 t=12 +shield  |T10 t=12 +shield | T10_8 t=24 -shield   |
+| 5   | T10 t=14 +shield | T10 t=60 +shield   | T10 t=14 +shield  |T10 t=14 +shield | T10_8 t=60 -shield   |
+| 6   | T10 t=16 +shield | T10 -guide +shield | T10 t=16 +shield  |T10 t=16 +shield | T10 -guide +shield   |
+| 7   | T10 t=18 +shield | T10 -guide -shield | T10 t=18 +shield  |T10 t=18 +shield | T10_2&8 t=0 -shield  |
+| 8   | T10 t=21 +shield |                    | T10 t=21 +shield  |T10 t=21 +shield | T10_2&8 t=8 -shield  |
+| 9   | T10 t=24 +shield |                    | T10 t=24 +shield  |T10 t=24 +shield | T10_2&8 t=16 -shield |
+| 10  | T10 t=33 +shield |                    | T10 t=33 +shield  |T10 t=33 +shield | T10_2&8 t=24 -shield |
+| 11  | T10 t=42 +shield |                    | T10 t=42 +shield  |T10 t=42 +shield | T10_2&8 t=60 -shield |
+| 12  | T10 t=60 +shield |                    | T10 t=60 +shield  |T10 t=60 +shield | T10 -guide +shield   |
+
+
+<h3>20170912 Run 4604 </h3>
+
+
+|index| AAVS1 T11        | AAVS1 T11 C        | chr11 T11         | chr11 T11 C        | LBR8 T11         | LBR8 T11 C        | LBR8 T12          | LBR2_8 T12        |LBR8_2 T12 C         |LBR2 T12          | LBR2 T12 c         |
+ |:---:|:----------------:|:------------------:|:-----------------:|:------------------:|:----------------:|:-----------------:|:-----------------:|:----------------:|:-------------------:|:----------------:|:------------------:|
+|     | A                | B                  | C                 |D                   | E                |F                  | G                 | H                 |I                    |J                 | K                  |
+| 1   | T11 t=4 +shield  | T11 t=0 -shield    | T11 t=4 +shield   | T11 t=0 -shield    | T11 t=4 +shield  | T11 t=0 -shield   | T12 t=4 +shield   | T12 t=4 +shield   |T12_8 t=0 -shield    | T12 t=4 +shield  | T12 t=0 -shield    |
+| 2   | T11 t=8 +shield  | T11 t=8 -shield    | T11 t=8 +shield   | T11 t=8 -shield    | T11 t=8 +shield  | T11 t=8 -shield   | T12 t=8 +shield   | T12 t=8 +shield   |T12_8 t=8 -shield    | T12 t=8 +shield  | T12 t=8 -shield    |
+| 3   | T11 t=10 +shield | T11 t=16 -shield   | T11 t=10 +shield  | T11 t=16 -shield   | T11 t=10 +shield | T11 t=16 -shield  | T12 t=10 +shield  | T12 t=10 +shield  |T12_8 t=16 -shield   | T12 t=10 +shield | T12 t=16 -shield   |
+| 4   | T11 t=12 +shield | T11 t=24 -shield   | T11 t=12 +shield  | T11 t=24 -shield   | T11 t=12 +shield | T11 t=24 -shield  | T12 t=10 +shield  | T12 t=12 +shield  |T12_8 t=24 -shield   | T12 t=12 +shield | T12 t=24 -shield   |
+| 5   | T11 t=14 +shield | T11 t=60 -shield   | T11 t=14 +shield  | T11 t=60 -shield   | T11 t=14 +shield | T11 t=60 -shield  | T12 t=14 +shield  | T12 t=14 +shield  |T12_8 t=60 -shield   | T12 t=14 +shield | T12 t=60 -shield   |
+| 6   | T11 t=16 +shield | T11 -guide +shield | T11 t=16 +shield  | T11 -guide +shield | T11 t=16 +shield | T11 -guide +shield| T12 t=16 +shield  | T12 t=16 +shield  |T12 -guide +shield   | T12 t=16 +shield | T12 -guide +shield |
+| 7   | T11 t=18 +shield | T11 T=87 +shield | T11 t=18 +shield  | T11 T=87 +shield     | T11 t=18 +shield | T11 T=87 +shield  | T12 t=18 +shield  | T12 t=18 +shield  |T12_2_8 t=0 -shield  | T12 t=18 +shield | T12 -guide -shield |
+| 8   | T11 t=21 +shield |                    | T11 t=21 +shield  |                    | T11 t=21 +shield |                   | T12 t=21 +shield  | T12 t=21 +shield  |T12_2_8 t=8 -shield  | T12 t=21 +shield |                    |
+| 9   | T11 t=24 +shield |                    | T11 t=24 +shield  |                    | T11 t=24 +shield |                   | T12 t=24 +shield  | T12 t=24 +shield  |T12_2_8 t=16 -shield | T12 t=24 +shield |                    |
+| 10  | T11 t=33 +shield |                    | T11 t=33 +shield  |                    | T11 t=33 +shield |                   | T12 t=33 +shield  | T12 t=33 +shield  |T12_2_8 t=24 -shield | T12 t=33 +shield |                    |
+| 11  | T11 t=42 +shield |                    | T11 t=42 +shield  |                    | T11 t=42 +shield |                   | T12 t=42 +shield  | T12 t=42 +shield  |T12_2_8 t=60 -shield | T12 t=42 +shield |                    |
+| 12  | T11 t=60 +shield |                    | T11 t=60 +shield  |                    | T11 t=60 +shield |                   | T12 t=60 +shield  | T12 t=60 +shield  |T12 -guide -shield   | T12 t=60 +shield |                    |
+
+
+<h3>Double cut import data</h3>
+<p>2 sgRNA are transfected in one cell</p>
+<p>the data consists of paired end read. read1 is viewpoint from guide1 and read2 is viewpoint from guide2</p>
+
+<h2>Import the sum of all types of mutations</h2>
+<p> The sum of insertion, deletion, point mutations, wild type per sample are calculated.</p>
+
+
+```{r Double cut import data}
+
+#each sample has one index for which timeseries it belong to and one index for the time point.
+samples <- dir()
+Idx_4236_s <-    grep('sum', grep('R1', grep('4236', samples, value=TRUE), value=TRUE), value=TRUE) 
+Idx_rv_4236_s <- grep('sum', grep('R2', grep('4236', samples, value=TRUE), value=TRUE), value=TRUE) 
+
+IdxA_4265_s <- grep('Idx-A', grep('sum', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxB_4265_s <- grep('Idx-B', grep('sum', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxC_4265_s <- grep('Idx-C', grep('sum', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxD_4265_s <- grep('Idx-D', grep('sum', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxE_4265_s <- grep('Idx-E', grep('sum_output_', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxE8_4265_s <- grep('Idx-E', grep('sum_output8_', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+
+IdxA_4265_rv_s <- grep('Idx-A', grep('sum', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxB_4265_rv_s <- grep('Idx-B', grep('sum', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxC_4265_rv_s <- grep('Idx-C', grep('sum', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxD_4265_rv_s <- grep('Idx-D', grep('sum', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxE_4265_rv_s <- grep('Idx-E', grep('sum_outputrv_', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxE8_4265_rv_s <- grep('Idx-E', grep('sum_output8rv_', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+
+IdxG_4604_s <- grep('Idx-G', grep('sum', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxI_4604_s <- grep('Idx-I', grep('sum_output_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxI8_4604_s <- grep('Idx-I', grep('sum_output8_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxH_4604_s <- grep('Idx-H', grep('sum_output_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxJ_4604_s <- grep('Idx-J', grep('sum', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxK_4604_s <- grep('Idx-K', grep('sum', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+
+IdxG_4604_rv_s <- grep('Idx-G', grep('sum', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxI_4604_rv_s <- grep('Idx-I', grep('sum_outputrv', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxI8_4604_rv_s <- grep('Idx-I', grep('sum_output8rv_', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxH_4604_rv_s <- grep('Idx-H', grep('sum_outputrv', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxJ_4604_rv_s <- grep('Idx-J', grep('sum', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxK_4604_rv_s <- grep('Idx-K', grep('sum', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+
+#sort the time series in the correct order
+ordF = function(x){
+  x[order(sapply(x,function(x){ as.numeric(strsplit(strsplit(strsplit(x,'_')[[1]][2],'output')[[1]][2], "rv"))}
+                 ))]
+}
+
+Idx_4236_s = ordF(Idx_4236_s);
+Idx_rv_4236_s = ordF(Idx_rv_4236_s);
+
+ordF = function(x){
+  x[order(sapply(x,function(x){
+    as.numeric(strsplit(strsplit(x,'_')[[1]][3],'-')[[1]][2])}
+    ))]
+}
+
+IdxA_4265_s = ordF(IdxA_4265_s);
+IdxB_4265_s = ordF(IdxB_4265_s);
+IdxC_4265_s = ordF(IdxC_4265_s);
+IdxD_4265_s = ordF(IdxD_4265_s);
+IdxE_4265_s = ordF(IdxE_4265_s);
+IdxE8_4265_s = ordF(IdxE8_4265_s);
+IdxA_4265_rv_s = ordF(IdxA_4265_rv_s);
+IdxB_4265_rv_s = ordF(IdxB_4265_rv_s);
+IdxC_4265_rv_s = ordF(IdxC_4265_rv_s);
+IdxD_4265_rv_s = ordF(IdxD_4265_rv_s);
+IdxE_4265_rv_s = ordF(IdxE_4265_rv_s);
+IdxE8_4265_rv_s = ordF(IdxE8_4265_rv_s);
+
+IdxG_4604_s = ordF(IdxG_4604_s);
+IdxI_4604_s = ordF(IdxI_4604_s);
+IdxI8_4604_s = ordF(IdxI8_4604_s);
+IdxH_4604_s = ordF(IdxH_4604_s);
+IdxJ_4604_s = ordF(IdxJ_4604_s);
+IdxK_4604_s = ordF(IdxK_4604_s);
+IdxG_4604_rv_s = ordF(IdxG_4604_rv_s);
+IdxI_4604_rv_s = ordF(IdxI_4604_rv_s);
+IdxI8_4604_rv_s = ordF(IdxI8_4604_rv_s);
+IdxH_4604_rv_s = ordF(IdxH_4604_rv_s);
+IdxJ_4604_rv_s = ordF(IdxJ_4604_rv_s);
+IdxK_4604_rv_s = ordF(IdxK_4604_rv_s);
+
+#import the files
+#import the files
+td      <- lapply(Idx_4236_s, read.table, header = FALSE)
+tdrv    <- lapply(Idx_rv_4236_s, read.table, header = FALSE)
+
+t10_2    <- lapply(IdxA_4265_s, read.table, header = FALSE)
+t10_2_c  <- lapply(IdxB_4265_s, read.table, header = FALSE)
+t10_8    <- lapply(IdxC_4265_s, read.table, header = FALSE)
+t10_8_c  <- lapply(IdxE_4265_s, read.table, header = FALSE)
+t10_28   <- lapply(IdxD_4265_s, read.table, header = FALSE)
+t10_28_c <- lapply(IdxE8_4265_s, read.table, header = FALSE)
+t10_2rv    <- lapply(IdxA_4265_rv_s, read.table, header = FALSE)
+t10_2_crv  <- lapply(IdxB_4265_rv_s, read.table, header = FALSE)
+t10_8rv    <- lapply(IdxC_4265_rv_s, read.table, header = FALSE)
+t10_8_crv  <- lapply(IdxE8_4265_rv_s, read.table, header = FALSE)
+t10_28rv   <- lapply(IdxD_4265_rv_s, read.table, header = FALSE)
+t10_28_crv <- lapply(IdxE_4265_rv_s, read.table, header = FALSE)
+
+t12_2    <- lapply(IdxJ_4604_s, read.table, header = FALSE)
+t12_2_c  <- lapply(IdxK_4604_s, read.table, header = FALSE)
+t12_8    <- lapply(IdxG_4604_s, read.table, header = FALSE)
+t12_8_c  <- lapply(IdxI8_4604_s, read.table, header = FALSE)
+t12_28   <- lapply(IdxH_4604_s, read.table, header = FALSE)
+t12_28_c <- lapply(IdxI_4604_s, read.table, header = FALSE)
+t12_2rv    <- lapply(IdxJ_4604_rv_s, read.table, header = FALSE)
+t12_2_crv  <- lapply(IdxK_4604_rv_s, read.table, header = FALSE)
+t12_8rv    <- lapply(IdxG_4604_rv_s, read.table, header = FALSE)
+t12_8_crv  <- lapply(IdxI8_4604_rv_s, read.table, header = FALSE)
+t12_28rv   <- lapply(IdxH_4604_rv_s, read.table, header = FALSE)
+t12_28_crv <- lapply(IdxI_4604_rv_s, read.table, header = FALSE)
+
+#make a list to group all the timeseries 
+Y <- list(td,
+          tdrv,
+          t10_2,
+          t10_2_c,
+          t10_8,
+          t10_8_c,
+          t10_28,
+          t10_28_c,
+          t10_2rv,
+          t10_2_crv,
+          t10_8rv,
+          t10_8_crv,
+          t10_28rv,
+          t10_28_crv,
+          t12_2,
+          t12_2_c,
+          t12_8,
+          t12_8_c,
+          t12_28,
+          t12_28_c,
+          t12_2rv,
+          t12_2_crv,
+          t12_8rv,
+          t12_8_crv,
+          t12_28rv,
+          t12_28_crv)
+
+#idx names of the various miseq runs
+names_samples <- c("3","3rv", "4A", "4B", "4C", "4E", "4D","4E8", "4Ar", "4Br", "4Cr", "4Er", "4Dr","4E8r", "5J", "5K", "5G","5H8","5I", "5H",  "5Jr", "5kr","5Gr", "5H8r", "5Ir", "5Hr")
+
+names(Y)<- names_samples
+
+# Calculate total amount of reads per sample
+df3 <- NA
+df3b <- NA
+for (j in 1:length(Y)){
+  for (i in 1:length(Y[[j]])){
+    df3[i] <- (Y[[j]][[i]][1])
+  }
+  df3b <- lapply(df3, as.numeric)  
+  if(j==1){td_sum     <- sapply(df3b, sum)}
+  if(j==2){tdrv_sum   <- sapply(df3b, sum)}
+  if(j==3){t10_2_sum   <- sapply(df3b, sum)}
+  if(j==4){t10_2_c_sum <- sapply(df3b, sum)}
+  if(j==5){t10_8_sum   <- sapply(df3b, sum)}
+  if(j==6){t10_8_c_sum <- sapply(df3b, sum)}
+  if(j==7){t10_28_sum   <- sapply(df3b, sum)}
+  if(j==8){t10_28_c_sum <- sapply(df3b, sum)}
+  if(j==9){t10_2rv_sum   <- sapply(df3b, sum)}
+  if(j==10){t10_2_crv_sum <- sapply(df3b, sum)}
+  if(j==11){t10_8rv_sum   <- sapply(df3b, sum)}
+  if(j==12){t10_8_crv_sum <- sapply(df3b, sum)}
+  if(j==13){t10_28rv_sum   <- sapply(df3b, sum)}
+  if(j==14){t10_28_crv_sum <- sapply(df3b, sum)}
+  if(j==15){t12_2_sum   <- sapply(df3b, sum)}
+  if(j==16){t12_2_c_sum <- sapply(df3b, sum)}
+  if(j==17){t12_8_sum   <- sapply(df3b, sum)}
+  if(j==18){t12_8_c_sum<- sapply(df3b, sum)}
+  if(j==19){t12_28_sum   <- sapply(df3b, sum)}
+  if(j==20){t12_28_c_sum <- sapply(df3b, sum)}
+  if(j==21){t12_2rv_sum   <- sapply(df3b, sum)}
+  if(j==22){t12_2_crv_sum <- sapply(df3b, sum)}
+  if(j==23){t12_8rv_sum   <- sapply(df3b, sum)}
+  if(j==24){t12_8_crv_sum <- sapply(df3b, sum)}
+  if(j==25){t12_28rv_sum   <- sapply(df3b, sum)}
+  if(j==26){t12_28_crv_sum <- sapply(df3b, sum)}
+}
+
+#make a list to group all the timeseries 
+Z <- list(td_sum,
+          tdrv_sum,
+          t10_2_sum,
+          t10_2_c_sum,
+          t10_8_sum,
+          t10_8_c_sum,
+          t10_28_sum,
+          t10_28_c_sum,
+          t10_2rv_sum,
+          t10_2_crv_sum,
+          t10_8rv_sum,
+          t10_8_crv_sum,
+          t10_28rv_sum,
+          t10_28_crv_sum,
+          t12_2_sum,
+          t12_2_c_sum,
+          t12_8_sum,
+          t12_8_c_sum,
+          t12_28_sum,
+          t12_28_c_sum,
+          t12_2rv_sum,
+          t12_2_crv_sum,
+          t12_8rv_sum,
+          t12_8_crv_sum,
+          t12_28rv_sum,
+          t12_28_crv_sum)
+
+#idx names of the various miseq runs
+names(Z)<-names_samples
+
+
+```
+
+<h2>Import the quantity of specific indels</h2>
+<p> The specific type of indel are determined. </p>
+
+```{r import indels, echo=FALSE}
+
+#The individual sequences, score and type of mutation are grouped in a list
+#each sample has one index for which timeseries it belongs and one index to identify the time point.
+samples <- dir()
+Idx_4236 <- grep('^o', grep('R1', grep('4236', samples, value=TRUE), value=TRUE), value=TRUE)
+Idx_4236_rv <- grep('^o', grep('R2', grep('4236', samples, value=TRUE), value=TRUE), value=TRUE)
+
+IdxA_4265 <- grep('Idx-A', grep('^o', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxB_4265 <- grep('Idx-B', grep('^o', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxC_4265 <- grep('Idx-C', grep('^o', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxD_4265 <- grep('Idx-D', grep('^o', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxE_4265 <- grep('Idx-E', grep('^output_', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxE8_4265 <- grep('Idx-E', grep('^output8_', grep('4265', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+
+IdxA_4265_rv <- grep('Idx-A', grep('^o', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxB_4265_rv <- grep('Idx-B', grep('^o', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxC_4265_rv <- grep('Idx-C', grep('^o', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxD_4265_rv <- grep('Idx-D', grep('^o', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxE_4265_rv <- grep('Idx-E', grep('^outputrv_', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxE8_4265_rv <- grep('Idx-E', grep('^output8rv_', grep('4265', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+
+IdxG_4604 <- grep('Idx-G', grep('^o', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxI_4604 <- grep('Idx-I', grep('^output_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxI8_4604 <- grep('Idx-I', grep('^output8_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)
+IdxH_4604 <- grep('Idx-H', grep('^output_', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxJ_4604 <- grep('Idx-J', grep('^o', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxK_4604 <- grep('Idx-K', grep('^o', grep('4604', grep('R1', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+
+IdxG_4604_rv <- grep('Idx-G', grep('^o', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxI_4604_rv <- grep('Idx-I', grep('^outputrv', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxI8_4604_rv <- grep('Idx-I', grep('^output8rv_', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxH_4604_rv <- grep('Idx-H', grep('^outputrv_', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE) 
+IdxJ_4604_rv <- grep('Idx-J', grep('^o', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+IdxK_4604_rv <- grep('Idx-K', grep('^o', grep('4604', grep('R2', samples, value=TRUE), value=TRUE), value=TRUE), value=TRUE)  
+
+#sort the time series in the correct order
+ordF2 = function(x){
+  x[order(sapply(x,function(x){ as.numeric(strsplit(strsplit(strsplit(x,'_')[[1]][1],'output')[[1]][2], "rv"))}
+                 ))]
+}
+
+Idx_4236 <- ordF2(Idx_4236)
+Idx_4236_rv <- ordF2(Idx_4236_rv)
+
+ordF2 = function(x){
+  x[order(sapply(x,function(x){as.numeric(strsplit(strsplit(x,'_')[[1]][2],'-')[[1]][2])}
+                 ))]
+}
+IdxA_4265 = ordF2(IdxA_4265);
+IdxB_4265 = ordF2(IdxB_4265);
+IdxC_4265 = ordF2(IdxC_4265);
+IdxD_4265 = ordF2(IdxD_4265);
+IdxE_4265 = ordF2(IdxE_4265);
+IdxE8_4265 = ordF2(IdxE8_4265);
+IdxA_4265_rv = ordF2(IdxA_4265_rv);
+IdxB_4265_rv = ordF2(IdxB_4265_rv);
+IdxC_4265_rv = ordF2(IdxC_4265_rv);
+IdxD_4265_rv = ordF2(IdxD_4265_rv);
+IdxE_4265_rv = ordF2(IdxE_4265_rv);
+IdxE8_4265_rv = ordF2(IdxE8_4265_rv);
+
+dxG_4604 = ordF2(IdxG_4604);
+IdxI_4604 = ordF2(IdxI_4604);
+IdxI8_4604 = ordF2(IdxI8_4604);
+IdxH_4604 = ordF2(IdxH_4604);
+IdxJ_4604 = ordF2(IdxJ_4604);
+IdxK_4604 = ordF2(IdxK_4604);
+IdxG_4604_rv = ordF2(IdxG_4604_rv);
+IdxI_4604_rv = ordF2(IdxI_4604_rv);
+IdxI8_4604_rv = ordF2(IdxI8_4604_rv);
+IdxH_4604_rv = ordF2(IdxH_4604_rv);
+IdxJ_4604_rv = ordF2(IdxJ_4604_rv);
+IdxK_4604_rv = ordF2(IdxK_4604_rv);
+
+#import the files
+timeseries_double    <- lapply(Idx_4236, read.delim, header = FALSE)
+timeseries_rv_double  <- lapply(Idx_4236_rv, read.delim, header = FALSE)
+
+timeseries10_2    <- lapply(IdxA_4265, read.delim, header = FALSE)
+timeseries10_2_c  <- lapply(IdxB_4265, read.delim, header = FALSE)
+timeseries10_8    <- lapply(IdxC_4265, read.delim, header = FALSE)
+timeseries10_8_c  <- lapply(IdxE8_4265, read.delim, header = FALSE)
+timeseries10_28   <- lapply(IdxD_4265, read.delim, header = FALSE)
+timeseries10_28_c <- lapply(IdxE_4265, read.delim, header = FALSE)
+timeseries10_2rv    <- lapply(IdxA_4265_rv, read.delim, header = FALSE)
+timeseries10_2_crv  <- lapply(IdxB_4265_rv, read.delim, header = FALSE)
+timeseries10_8rv    <- lapply(IdxC_4265_rv, read.delim, header = FALSE)
+timeseries10_8_crv  <- lapply(IdxE8_4265_rv, read.delim, header = FALSE)
+timeseries10_28rv   <- lapply(IdxD_4265_rv, read.delim, header = FALSE)
+timeseries10_28_crv <- lapply(IdxE_4265_rv, read.delim, header = FALSE)
+
+timeseries12_2    <- lapply(IdxJ_4604, read.delim, header = FALSE)
+timeseries12_2_c  <- lapply(IdxK_4604, read.delim, header = FALSE)
+timeseries12_8    <- lapply(IdxG_4604, read.delim, header = FALSE)
+timeseries12_8_c  <- lapply(IdxI8_4604, read.delim, header = FALSE)
+timeseries12_28   <- lapply(IdxH_4604, read.delim, header = FALSE)
+timeseries12_28_c <- lapply(IdxI_4604, read.delim, header = FALSE)
+timeseries12_2rv    <- lapply(IdxJ_4604_rv, read.delim, header = FALSE)
+timeseries12_2_crv  <- lapply(IdxK_4604_rv, read.delim, header = FALSE)
+timeseries12_8rv    <- lapply(IdxG_4604_rv, read.delim, header = FALSE)
+timeseries12_8_crv  <- lapply(IdxI8_4604_rv, read.delim, header = FALSE)
+timeseries12_28rv   <- lapply(IdxH_4604_rv, read.delim, header = FALSE)
+timeseries12_28_crv <- lapply(IdxI_4604_rv, read.delim, header = FALSE)
+
+#make a list to group all the timeseries 
+X <- list(timeseries_double,
+          timeseries_rv_double,
+          timeseries10_2,
+          timeseries10_2_c,
+          timeseries10_8,
+          timeseries10_8_c,
+          timeseries10_28,
+          timeseries10_28_c,
+          timeseries10_2rv,
+          timeseries10_2_crv,
+          timeseries10_8rv,
+          timeseries10_8_crv,
+          timeseries10_28rv,
+          timeseries10_28_crv,
+          timeseries12_2,
+          timeseries12_2_c,
+          timeseries12_8,
+          timeseries12_8_c,
+          timeseries12_28,
+          timeseries12_28_c,
+          timeseries12_2rv,
+          timeseries12_2_crv,
+          timeseries12_8rv,
+          timeseries12_8_crv,
+          timeseries12_28rv,
+          timeseries12_28_crv)
+
+names(X)<-names_samples
+
+
+#Count the various mutations in the sample
+df4 <- list()
+for (j in 1:length(X)){
+  for (i in 1:length(X[[j]])){
+    # if(i ==1|i==2){
+        #df4[[i]] <- 0}else{
+    if(i > length(X[[j]])){
+      df4[[i]] <- 0
+    } else {
+      a <- 2
+      if(length(X[[j]][[i]])>4){a <- 3}
+    df4[[i]] <- (X[[j]][[i]][(a+1)][!(X[[j]][[i]][a]=="not_clear"),])
+    }    
+    }#}
+  if(j==1){pd         <- lapply(df4, table)}
+  if(j==2){pd_rv      <- lapply(df4, table)}
+  if(j==3){p10_2      <- lapply(df4, table)}
+  if(j==4){p10_2_c    <- lapply(df4, table)}
+  if(j==5){p10_8      <- lapply(df4, table)}
+  if(j==6){p10_8_c    <- lapply(df4, table)}
+  if(j==7){p10_28     <- lapply(df4, table)}
+  if(j==8){p10_28_c   <- lapply(df4, table)}
+  if(j==9){p10_2rv    <- lapply(df4, table)}
+  if(j==10){p10_2_crv  <- lapply(df4, table)}
+  if(j==11){p10_8rv    <- lapply(df4, table)}
+  if(j==12){p10_8_crv  <- lapply(df4, table)}
+  if(j==13){p10_28rv   <- lapply(df4, table)}
+  if(j==14){p10_28_crv <- lapply(df4, table)}
+  if(j==15){p12_2      <- lapply(df4, table)}
+  if(j==16){p12_2_c    <- lapply(df4, table)}
+  if(j==17){p12_8      <- lapply(df4, table)}
+  if(j==18){p12_8_c    <- lapply(df4, table)}
+  if(j==19){p12_28     <- lapply(df4, table)}
+  if(j==20){p12_28_c   <- lapply(df4, table)}
+  if(j==21){p12_2rv    <- lapply(df4, table)}
+  if(j==22){p12_2_crv  <- lapply(df4, table)}
+  if(j==23){p12_8rv    <- lapply(df4, table)}
+  if(j==24){p12_8_crv  <- lapply(df4, table)}
+  if(j==25){p12_28rv   <- lapply(df4, table)}
+  if(j==26){p12_28_crv <- lapply(df4, table)}
+ }
+
+#group all the timeseries together
+V <- list(pd,
+          pd_rv,
+          p10_2,
+          p10_2_c,
+          p10_8,
+          p10_8_c,
+          p10_28,
+          p10_28_c,
+          p10_2rv,
+          p10_2_crv,
+          p10_8rv,
+          p10_8_crv,
+          p10_28rv,
+          p10_28_crv,
+          p12_2,
+          p12_2_c,
+          p12_8,
+          p12_8_c,
+          p12_28,
+          p12_28_c,
+          p12_2rv,
+          p12_2_crv,
+          p12_8rv,
+          p12_8_crv,
+          p12_28rv,
+          p12_28_crv)
+
+names(V)< names_samples
+
+#####
+df4 <- list()
+df5 <- list()
+
+for (j in 1:length(X)){
+  for (i in 1:length(Z[[j]])){
+      #  if(j ==1|j==2|
+    if(j==24){}else{
+          
+    if(length(X[[j]][[i]][[4]])>0){
+    df4[[i]] <- (X[[j]][[i]][(X[[j]][[i]][3]!="not_clear"),])
+    df5[[i]] <- length(X[[j]][[i]][1][(X[[j]][[i]][3]=="not_clear"),])
+    } else {
+      df4[[j]][[i]] <- 0
+      df5[[j]][[i]] <- 0
+    }}  }
+  if(j==1){wd          <- df4; notcl_d      <- df5}
+  if(j==2){wd_rv       <- df4; notcl_d_rv   <- df5}
+  if(j==3){w10_2       <- df4; notcl_10_2   <- df5}
+  if(j==4){w10_2_c     <- df4; notcl_10_2_c   <- df5}
+  if(j==5){w10_8       <- df4; notcl_10_8   <- df5}
+  if(j==6){w10_8_c     <- df4; notcl_10_8_c   <- df5}
+  if(j==7){w10_28      <- df4; notcl_10_28   <- df5}
+  if(j==8){w10_28_c    <- df4; notcl_10_28_c   <- df5}
+  if(j==9){w10_2rv     <- df4; notcl_10_2rv   <- df5}
+  if(j==10){w10_2_crv  <- df4; notcl_10_2_cr   <- df5}
+  if(j==11){w10_8rv    <- df4; notcl_10_8rv   <- df5}
+  if(j==12){w10_8_crv  <- df4; notcl_10_8_cr   <- df5}
+  if(j==13){w10_28rv   <- df4; notcl_10_28rv   <- df5}
+  if(j==14){w10_28_crv <- df4; notcl_10_28_crv   <- df5}
+  if(j==15){w12_2      <- df4; notcl_12_2   <- df5}
+  if(j==16){w12_2_c    <- df4; notcl_12_2_c   <- df5}
+  if(j==17){w12_8      <- df4; notcl_12_8   <- df5}
+  if(j==18){w12_8_c    <- df4; notcl_12_8_c   <- df5}
+  if(j==19){w12_28     <- df4; notcl_12_28   <- df5}
+  if(j==20){w12_28_c   <- df4; notcl_12_28_c   <- df5}
+  if(j==21){w12_2rv    <- df4; notcl_12_2rv   <- df5}
+  if(j==22){w12_2_crv  <- df4; notcl_12_2_crv   <- df5}
+  if(j==23){w12_8rv    <- df4; notcl_12_8rv   <- df5}
+  #if(j==24){w12_8_crv  <- df4; notcl_12_8_crv   <- df5}
+  if(j==25){w12_28rv   <- df4; notcl_12_28rv   <- df5}
+  if(j==26){w12_28_crv <- df4; notcl_12_28_cr   <- df5}
+  
+}
+
+#group all the timeseries together
+notcl_3 <- list(notcl_d,
+                notcl_d_rv)
+
+W <- list(wd,
+          wd_rv,
+          w10_2,
+          w10_2_c,
+          w10_8,
+          w10_8_c,
+          w10_28,
+          w10_28_c,
+          w10_2rv,
+          w10_2_crv,
+          w10_8rv,
+          w10_8_crv,
+          w10_28rv,
+          w10_28_crv,
+          w12_2,
+          w12_2_c,
+          w12_8,
+          w12_8_c,
+          w12_28,
+          w12_28_c,
+          w12_2rv,
+          w12_2_crv,
+          w12_8rv,
+         # w12_8_crv,
+          w12_28rv,
+          w12_28_crv)
+
+
+
+
+```
+
+<h2>Order samples</h2>
+
+```{r order files}
+
+####group one timeseries together in one variable
+
+#sum of the various types 
+t10_2_order <- c(t10_2_c[1], t10_2)
+t10_8_order <- c(t10_8_c[1], t10_8)
+t10_28_order <- c(t10_28_c[7], t10_28)
+t10_2rv_order <- c(t10_2_crv[1], t10_2rv)
+t10_8rv_order <- c(t10_8_crv[1], t10_8rv)
+t10_28rv_order <- c(t10_28_crv[7], t10_28rv)
+t12_LBR2_order <- c(t12_2_c[1], t12_2)
+t12_LBR8_order <- c(t12_8_c[1], t12_8)
+t12_LBR28_order <- c(t12_28_c[7], t12_28)
+t12_LBR2rv_order <- c(t12_2_crv[1], t12_2rv)
+t12_LBR8rv_order <- c(t12_8_crv[1], t12_8rv)
+t12_LBR28rv_order <- c(t12_28_crv[7], t12_28rv)
+
+t10_2_c_order <- c(t10_2_c[1:6])
+t10_8_c_order <- c(t10_8_c[1:6])
+t10_28_c_order <- c(t10_28_c[7:12])
+t10_2_crv_order <- c(t10_2_crv[1:6])
+t10_8_crv_order <- c(t10_8_crv[1:6])
+t10_28_crv_order <- c(t10_28_crv[7:12])
+t12_LBR2_c_order <- c(t12_2_c[1:6])
+t12_LBR8_c_order <- c(t12_8_c[1:6])
+t12_LBR28_c_order <- c(t12_28_c[7:12])
+t12_LBR2_crv_order <- c(t12_2_crv[1:6])
+t12_LBR8_crv_order <- c(t12_8_crv[1:6])
+t12_LBR28_crv_order <- c(t12_28_crv[7:12])
+
+Y_order <- list(t10_2_order,
+                t10_2_c_order,
+                t10_8_order,
+                t10_8_c_order, 
+                t10_28_order,
+                t10_28_c_order,
+                t10_2rv_order,
+                t10_2_crv_order,
+                t10_8rv_order,
+                t10_8_crv_order, 
+                t10_28rv_order,
+                t10_28_crv_order,
+                t12_LBR2_order,
+                t12_LBR8_order, 
+                t12_LBR28_order, 
+                t12_LBR2rv_order,
+                t12_LBR8rv_order, 
+                t12_LBR28rv_order, 
+                t12_LBR2_c_order,
+                t12_LBR8_c_order,
+                t12_LBR28_c_order,
+                t12_LBR2_crv_order,
+                t12_LBR8_crv_order,
+                t12_LBR28_crv_order)
+
+#time series names
+names_order <- c("t10_2", "t10_2_c", "t10_8", "t10_8_c", "t10_28", "t10_28_c", "t10_2rv", "t10_2_crv", "t10_8rv", "t10_8_crv", "t10_28rv", "t10_28_crv", "t12_2", "t12_8", "t12_28","t12_2rv", "t12_8rv", "t12_28rv","t12_2_C", "t12_8_c", "t12_28_c", "t12_2_crv", "t12_8_crv", "t12_28_crv")
+
+names(Y_order)<-names_order
+
+#total amount of reads per sample
+t10_2_sum_order <- c(t10_2_c_sum[1], t10_2_sum)
+t10_8_sum_order <- c(t10_8_c_sum[1], t10_8_sum)
+t10_28_sum_order <- c(t10_28_c_sum[7], t10_28_sum)
+t10_2rv_sum_order <- c(t10_2_crv_sum[1], t10_2rv_sum)
+t10_8rv_sum_order <- c(t10_8_crv_sum[1], t10_8rv_sum)
+t10_28rv_sum_order <- c(t10_28_crv_sum[7], t10_28rv_sum)
+t12_LBR2_sum_order <- c(t12_2_c_sum[1], t12_2_sum)
+t12_LBR8_sum_order <- c(t12_8_c_sum[1], t12_8_sum)
+t12_LBR28_sum_order <- c(t12_28_c_sum[7], t12_28_sum)
+t12_LBR2rv_sum_order <- c(t12_2_crv_sum[1], t12_2rv_sum)
+t12_LBR8rv_sum_order <- c(t12_8_crv_sum[1], t12_8rv_sum)
+t12_LBR28rv_sum_order <- c(t12_28_crv_sum[7], t12_28rv_sum)
+
+t10_2_c_sum_order <- c(t10_2_c_sum[1:6])
+t10_8_c_sum_order <- c(t10_8_c_sum[1:6])
+t10_28_c_sum_order <- c(t10_28_c_sum[7:12])
+t10_2_crv_sum_order <- c(t10_2_crv_sum[1:6])
+t10_8_crv_sum_order <- c(t10_8_crv_sum[1:6])
+t10_28_crv_sum_order <- c(t10_28_crv_sum[7:12])
+t12_LBR2_c_sum_order <- c(t12_2_c_sum[1:6])
+t12_LBR8_c_sum_order <- c(t12_8_c_sum[1:6])
+t12_LBR28_c_sum_order <- c(t12_28_c_sum[7:12])
+t12_LBR2_crv_sum_order <- c(t12_2_crv_sum[1:6])
+t12_LBR8_crv_sum_order <- c(t12_8_crv_sum[1:6])
+t12_LBR28_crv_sum_order <- c(t12_28_crv_sum[7:12])
+
+Z_order <- list(t10_2_sum_order,
+                t10_2_c_sum_order,
+                t10_8_sum_order,
+                t10_8_c_sum_order,
+                t10_28_sum_order,
+                t10_28_c_sum_order,
+                t10_2rv_sum_order,
+                t10_2_crv_sum_order,
+                t10_8rv_sum_order,
+                t10_8_crv_sum_order,
+                t10_28rv_sum_order,
+                t10_28_crv_sum_order,
+              
+                t12_LBR2_sum_order,
+                t12_LBR8_sum_order, 
+                t12_LBR28_sum_order,
+                t12_LBR2rv_sum_order,
+                t12_LBR8rv_sum_order, 
+                t12_LBR28rv_sum_order, 
+              
+                t12_LBR2_c_sum_order,
+                t12_LBR8_c_sum_order, 
+                t12_LBR28_c_sum_order,
+                t12_LBR2_crv_sum_order,
+                t12_LBR8_crv_sum_order, 
+                t12_LBR28_crv_sum_order)
+
+#time series names
+names(Z_order)<- names_order
+
+#type of mutations, score of the mutation, sequence read, grouped per timeseries
+timeseries10_2_order <- c(timeseries10_2_c[1], timeseries10_2)
+timeseries10_8_order <- c(timeseries10_8_c[1], timeseries10_8)
+timeseries10_28_order <- c(timeseries10_28_c[7], timeseries10_28)
+timeseries10_2rv_order <- c(timeseries10_2_crv[1], timeseries10_2rv)
+timeseries10_8rv_order <- c(timeseries10_8_crv[1], timeseries10_8rv)
+timeseries10_28rv_order <- c(timeseries10_28_crv[7], timeseries10_28rv)
+timeseries12_LBR2_order <- c(timeseries12_2_c[1], timeseries12_2)
+timeseries12_LBR8_order <- c(timeseries12_8_c[1], timeseries12_8)
+timeseries12_LBR28_order <- c(timeseries12_28_c[7], timeseries12_28)
+timeseries12_LBR2rv_order <- c(timeseries12_2_crv[1], timeseries12_2rv)
+timeseries12_LBR8rv_order <- c(timeseries12_8_crv[1], timeseries12_8rv)
+timeseries12_LBR28rv_order <- c(timeseries12_28_crv[7], timeseries12_28rv)
+
+timeseries10_2_c_order <- c(timeseries10_2_c[1:6])
+timeseries10_8_c_order <- c(timeseries10_8_c[1:6])
+timeseries10_28_c_order <- c(timeseries10_28_c[7:12])
+timeseries10_2_crv_order <- c(timeseries10_2_crv[1:6])
+timeseries10_8_crv_order <- c(timeseries10_8_crv[1:6])
+timeseries10_28_crv_order <- c(timeseries10_28_crv[7:12])
+timeseries12_LBR2_c_order <- c(timeseries12_2_c[1:6])
+timeseries12_LBR8_c_order <- c(timeseries12_8_c[1:6])
+timeseries12_LBR28_c_order <- c(timeseries12_28_c[7:12])
+timeseries12_LBR2_crv_order <- c(timeseries12_2_crv[1:6])
+timeseries12_LBR8_crv_order <- c(timeseries12_8_crv[1:6])
+timeseries12_LBR28_crv_order <- c(timeseries12_28_crv[7:12])
+
+X_order <- list(timeseries10_2_order,
+                timeseries10_2_c_order,
+                timeseries10_8_order,
+                timeseries10_8_c_order,
+                timeseries10_28_order,
+                timeseries10_28_c_order,
+                timeseries10_2rv_order,
+                timeseries10_2_crv_order,
+                timeseries10_8rv_order,
+                timeseries10_8_crv_order,
+                timeseries10_28rv_order,
+                timeseries10_28_crv_order,
+                timeseries12_LBR2_order,
+                timeseries12_LBR8_order, 
+                timeseries12_LBR28_order,
+                timeseries12_LBR2rv_order,
+                timeseries12_LBR8rv_order, 
+                timeseries12_LBR28rv_order,
+                timeseries12_LBR2_c_order,
+                timeseries12_LBR8_c_order, 
+                timeseries12_LBR28_c_order,
+                timeseries12_LBR2_crv_order,
+                timeseries12_LBR8_crv_order, 
+                timeseries12_LBR28_crv_order)
+
+
+#time series names
+names(X_order)<- names_order
+
+#sum of the various indel per sample
+p10_2_order <- c(p10_2_c[1], p10_2)
+p10_8_order <- c(p10_8_c[1], p10_8)
+p10_28_order <- c(p10_28_c[7], p10_28)
+p10_2rv_order <- c(p10_2_crv[1], p10_2rv)
+p10_8rv_order <- c(p10_8_crv[1], p10_8rv)
+p10_28rv_order <- c(p10_28_crv[7], p10_28rv)
+p12_LBR2_order <- c(p12_2_c[1], p12_2)
+p12_LBR8_order <- c(p12_8_c[1], p12_8)
+p12_LBR28_order <- c(p12_28_c[7], p12_28)
+p12_LBR2rv_order <- c(p12_2_crv[1], p12_2rv)
+p12_LBR8rv_order <- c(p12_8_crv[1], p12_8rv)
+p12_LBR28rv_order <- c(p12_28_crv[7], p12_28rv)
+
+p10_2_c_order <- c(p10_2_c[1:6])
+p10_8_c_order <- c(p10_8_c[1:6])
+p10_28_c_order <- c(p10_28_c[7:12])
+p10_2_crv_order <- c(p10_2_crv[1:6])
+p10_8_crv_order <- c(p10_8_crv[1:6])
+p10_28_crv_order <- c(p10_28_crv[7:12])
+p12_LBR2_c_order <- c(p12_2_c[1:6])
+p12_LBR8_c_order <- c(p12_8_c[1:6])
+p12_LBR28_c_order <- c(p12_28_c[7:12])
+p12_LBR2_crv_order <- c(p12_2_crv[1:6])
+p12_LBR8_crv_order <- c(p12_8_crv[1:6])
+p12_LBR28_crv_order <- c(p12_28_crv[7:12])
+
+V_order <- list(p10_2_order,
+                p10_2_c_order,
+                p10_8_order,
+                p10_8_c_order,
+                p10_28_order,    
+                p10_28_c_order,     
+                p10_2rv_order,
+                p10_2_crv_order,
+                p10_8rv_order,
+                p10_8_crv_order,
+                p10_28rv_order,    
+                p10_28_crv_order,        
+                p12_LBR2_order,
+                p12_LBR8_order, 
+                p12_LBR28_order,
+                p12_LBR2rv_order,
+                p12_LBR8rv_order, 
+                p12_LBR28rv_order, 
+                p12_LBR8_c_order,
+                p12_LBR2_c_order,
+                p12_LBR28_c_order,
+                p12_LBR8_crv_order,
+                p12_LBR2_crv_order,
+                p12_LBR28_crv_order)
+
+#time series names
+names(V_order)<- names_order
+
+w10_2_order <- c(w10_2_c[1], w10_2)
+w10_8_order <- c(w10_8_c[1], w10_8)
+w10_28_order <- c(w10_28_c[7], w10_28)
+w10_2rv_order <- c(w10_2_crv[1], w10_2rv)
+w10_8rv_order <- c(w10_8_crv[1], w10_8rv)
+w10_28rv_order <- c(w10_28_crv[7], w10_28rv)
+w12_LBR2_order <- c(w12_2_c[1], w12_2)
+w12_LBR8_order <- c(w12_8_c[1], w12_8)
+w12_LBR28_order <- c(w12_28_c[7], w12_28)
+w12_LBR2rv_order <- c(w12_2_crv[1], w12_2rv)
+#w12_LBR8rv_order <- c(w12_8_crv[1], w12_8rv)
+w12_LBR28rv_order <- c(w12_28_crv[7], w12_28rv)
+
+w10_2_c_order <- c(w10_2_c[1:6])
+w10_8_c_order <- c(w10_8_c[1:6])
+w10_28_c_order <- c(w10_28_c[7:12])
+w10_2_crv_order <- c(w10_2_crv[1:6])
+w10_8_crv_order <- c(w10_8_crv[1:6])
+w10_28_crv_order <- c(w10_28_crv[7:12])
+w12_LBR2_c_order <- c(w12_2_c[1:6])
+w12_LBR8_c_order <- c(w12_8_c[1:6])
+w12_LBR28_c_order <- c(w12_28_c[7:12])
+w12_LBR2_crv_order <- c(w12_2_crv[1:6])
+#w12_LBR8_crv_order <- c(w12_8_crv[1:6])
+w12_LBR28_crv_order <- c(w12_28_crv[7:12])
+
+W_order <- list(w10_2_order,
+                w10_2_c_order,
+                w10_8_order,
+                w10_8_c_order,
+                w10_28_order,    
+                w10_28_c_order,     
+                w10_2rv_order,
+                w10_2_crv_order,
+                w10_8rv_order,
+                w10_8_crv_order,
+                w10_28rv_order,    
+                w10_28_crv_order,        
+                w12_LBR2_order,
+                w12_LBR8_order, 
+                w12_LBR28_order,
+                w12_LBR2rv_order,
+                #w12_LBR8rv_order, 
+                w12_LBR28rv_order, 
+                w12_LBR8_c_order,
+                w12_LBR2_c_order,
+                w12_LBR28_c_order,
+                #w12_LBR8_crv_order,
+                w12_LBR2_crv_order,
+                w12_LBR28_crv_order)
+
+#time series names
+#names(W_order)<- names_order
+
+```
+
+<h3>Functions to extract data from sequencing files from double cut experiment</h3>
+
+<p>
+Match the forward and reverse read per unqiue sequence same
+The sample are normalized to the total amount of read per sample.
+</p>
+
+```{r Double cut functions}
+#####################################
+#Timeseries
+#####################################
+
+# each timepoint is corrected for the total reads per sample
+# the indels at t=0 are substracted from all timeoints
+# notclear sample (no assigned to wt, deletion, insertion or point mutations) are discarded
+# Point mutations are considered als wt reads
+
+timeseriesplots <- function(Y_order, Z_order, jt, time_all){
+  
+  names_samples <- names(Y_order[jt])
+ 
+  wildtype_tot <- mutations <- matrix(NA, nrow=length(time_all)+1)
+  mutations_tot <- mutations <- matrix(NA, nrow=length(time_all)+1)
+  rownames(wildtype_tot) <- rownames(mutations_tot) <- c(time_all,"U")
+  
+  for (q in 1:length(jt)){
+    wildtype <- mutations <- matrix(NA, nrow=length(time_all))
+    rownames(wildtype) <- rownames(mutations) <- time_all
+    j <- jt[q]
+
+  df <- ldply(Y_order[[j]], data.frame)
+  df2 <- ddply(df, .(V2), function(x) { x$index <- 1:nrow(x); x})
+  colnames(df2) <- c("tot_read", "type", "index")
+
+  #check
+  head(df)
+  head(df2)
+  head(Z_order[[j]][1])
+
+  #take the ratio by dividing to total amount of read per sample to normalize for difference of reads counts per input
+
+  #check the proportion of reads that were not assigned to a specific type (not clear)
+  notcl <- (df2$tot_read[df2$type=="not_clear"]/Z_order[[j]])*100
+  notcl
+  notcl2 <- (df2$tot_read[df2$type=="not_clear"])
+
+  #remove the notcl reads
+  del <- (as.numeric(df2$tot_read[df2$type=="del"])/ ((Z_order[[j]])-notcl2))*100
+  ins <- (df2$tot_read[df2$type=="ins"]/((Z_order[[j]])-notcl2))*100
+  wt <- (df2$tot_read[df2$type=="wt"]/ ((Z_order[[j]])-notcl2))*100
+  pmut <- (df2$tot_read[df2$type=="wt_point_mut"]/((Z_order[[j]])-notcl2))*100
+
+  #combine the different mutations (insertion and deletions) or non mutations (wild-type and point   mutations)
+  indel <- del+ins
+  wt2 <- wt+pmut
+  indel
+  wt2
+  wt2+indel
+
+  #substract baseline = substract the reads of mutations at time point t=0 from all other timepoints
+  indel <- indel-indel[1]
+  indel[indel<=0] <- 0
+
+  tot <- wt2+indel
+  tot
+
+  wt2 <- (wt2/tot)*100
+  indel <- (indel/tot)*100
+  wt2+indel
+
+  ptime <- time_all
+  
+  #timeseries 3 had one different time point t=37 instead of t=21
+  #some of controls have different time points
+  time <- c(0, 4, 8, 10, 12, 14, 16, 18, 21, 24, 33, 42, 60)
+  time2 <- c(0, 4, 8, 10, 12, 14, 16, 18, 24, 33, 37, 42, 60)
+  time3 <- c( 0,4,8,10,12,14,16,18,21,24,33,42,60,93,115,158)
+  time_c <- c(0,8,16,24,60,70)
+  time_c1 <- c(0,8,18,60,70)
+  time_c2 <- c(60,70)
+  time_c3 <- c(0,8,16,18, 24,60,158,165)
+
+  
+
+  wildtype[as.character(ptime),] <- wt2
+  mutations[as.character(ptime),] <- indel
+
+  U <- Ui <- NA
+  
+  # sigmoidal function to determine untransfected fraction
+  sigmoid = function(params, x) {
+  1-params[1] / (1 + exp(-params[2] * (x - params[3])))
+  }
+
+  df6 <- data.frame(time=ptime, wt=wt2,indel=indel)
+  df6[,2:3] <- df6[,2:3]/100
+
+  x=df6[,1];
+  y=df6[,2];
+  z=df6[,3];
+  
+  if(length(time_all)>7){
+  fitmodel_s <- nls(y~(1-a/(1 + exp(-b * (x-c)))), start=list(a=17,b=1,c=1))
+  U = coef(fitmodel_s)[1];
+  Ui = 1-coef(fitmodel_s)[1];
+  } 
+  
+  if(length(time_all)<14){
+  U = df6$indel[which(df6$time==60)];
+  Ui = 1-U;
+  } 
+  
+  wildtype1 <- rbind(wildtype, Ui*100)
+  mutations1 <- rbind(mutations, U*100)
+
+  wildtype_tot <- cbind(wildtype_tot, wildtype1)
+  mutations_tot <- cbind(mutations_tot, mutations1)
+  
+  #plot progress of wt and indels in time 
+   plot(time_all,wildtype, xlab='time (h)',ylab='wt/(indel+wt) (%)', main=paste('series', names_samples[q]), xlim=c(0,max(time_all)),ylim=c(0,100),pch=20,cex=1.5, col=2)
+  
+  plot(time_all,mutations, type="p", xlab='time (h)', ylab='indel/(indel+wt) (%)', main=paste('series', names_samples[q]), xlim=c(0,max(time_all)), ylim=c(0,100), pch=20, cex=1.5, col=3)
+  }
+  
+  wildtype_tot <- as.matrix(wildtype_tot[,-1])
+  mutations_tot <- as.matrix(mutations_tot[,-1])
+  
+  if(ncol(wildtype_tot)>1){
+    colnames(wildtype_tot) <- colnames(mutations_tot) <- paste('index', jt)
+  }
+ 
+  return(list(
+      wildtype_tot=wildtype_tot,
+      mutations_tot=mutations_tot,
+      names_samples=names_samples))
+}
+
+
+#####################################
+#Match paired reads
+#####################################
+
+#merge the forward and reverse read together.
+#plot the indels sizes of read1 versus read2 
+
+match_pairs <- function(W, jt, jrv, samplesnames){
+P <- list()
+
+for(i in 1:length(W[[jt]])){
+ df10 <- W[[jt]][[i]]
+ df11 <- W[[jrv]][[i]]
+
+ df12 <- df10[df10[,'V1'] %in% df11[,'V1'],] 
+ df13 <- df11[match(df12[,'V1'], df11[,'V1']),]
+ df14 <- cbind(df12, df13)
+ plot(df12[,'V4'], df13[,'V4'], pch=20, main=paste(samplesnames[i]), xlab="indelsize guide2", ylab="indelsize guide1")
+
+ P[[i]] <- df14
+}
+ return(P=P)
+ }
+
+
+#####################################
+#Identify the various types of mutatations at guide1 or guide2 position
+#####################################
+
+doublecut <- function(je, P, ex, samplesnames){ 
+ 
+ guide1 <- guide2 <- guide12_perfect <- guide12_del <- guide12_ins <- guide12 <- guide12_wt <- NA
+ guide1_b <- guide2_b <- guide12_perfect_b <- guide12_del_b <- guide12_ins_b <- guide12_b <- guide12_wt_b <- list() 
+ 
+for(i in 1:length(je)){
+ ji <- je[i]
+ df14 <- P[[ji]]
+
+ a <- (df14[(df14[,4]!=0),])
+ b <- (a[(a[,9]==0),])
+ guide1_b[[i]] <- b
+ guide1[i] <- length(b[,1])
+
+ a <- (df14[(df14[,9]!=0),])
+ b <- (a[(a[,4]==0),])
+ guide2_b[[i]] <- b
+ guide2[i] <- length(b[,1])
+
+ a <- (df14[(df14[,9]!=0 & df14[,9]>(ex[i]+5)),])
+ b <- (a[(a[,4]!=0 & a[,4]>(ex[i]+5)),])
+ guide12_b[[i]] <- b
+ guide12[i] <- length(b[,1])
+ 
+ a <- (df14[(df14[,9]==ex[i]),])
+ b <- (a[(a[,4]==ex[i]),])
+ guide12_perfect_b[[i]] <- b
+ guide12_perfect[i] <- length(b[,1])
+ 
+ a <- (df14[(df14[,9]!=0 & df14[,9]<ex[i]),])
+ b <- (a[(a[,4]!=0 & a[,4]<ex[i]),])
+ guide12_del_b[[i]] <- b
+ guide12_del[i] <- length(b[,1])
+
+ a <- (df14[(df14[,9]!=0 & df14[,9]<=(ex[i]+5) & df14[,9]>ex[i]),])
+ b <- (a[(a[,4]!=0 & a[,4]<=(ex[i]+5) & a[,4]>ex[i]),])
+ guide12_ins_b[[i]] <- b
+ guide12_ins[i] <- length(b[,1])
+ 
+ a <- (df14[(df14[,9]==0),])
+ b <- (a[(a[,4]==0),])
+ guide12_wt_b[[i]] <- b
+ guide12_wt[i] <- length(b[,1])
+
+ tot <- tot2 <- NA
+tot[i] <- length(df14[,1])
+tot2[i] <- guide1[i]+guide2[i]+guide12[i]+guide12_perfect[i]+guide12_del[i]+guide12_ins[i]+guide12_wt[i]
+
+notclear <- tot2[i]/tot[i]
+
+guide1[i] <- guide1[i]/tot2[i]*100
+guide2[i] <- guide2[i]/tot2[i]*100
+guide12[i] <- guide12[i]/tot2[i]*100
+guide12_perfect[i] <- guide12_perfect[i]/tot2[i]*100
+guide12_del[i] <- guide12_del[i]/tot2[i]*100
+guide12_ins[i] <- guide12_ins[i]/tot2[i]*100
+guide12_wt[i] <- guide12_wt[i]/tot2[i]*100
+
+barplot(c(guide1[i], guide2[i], guide12[i], guide12_perfect[i], guide12_del[i], guide12_ins[i], guide12_wt[i]), 
+        names=c("guide1 only", "guide2 only", "guide1_2 indels both", "guide1_2_perfect", "guide1_2_del", "guide1_2_ins", "guide1_2_wt"),
+        ylab="% in the pool",
+        main=paste(samplesnames[i]))
+}
+
+guide1+guide2+guide12+guide12_perfect+guide12_del+guide12_ins+guide12_wt
+
+return(list(
+  guide1=guide1,
+  guide2=guide2,
+  guide12_perfect=guide12_perfect,
+  guide12_del=guide12_del,
+  guide12_ins=guide12_ins,
+  guide12=guide12,
+  guide12_wt=guide12_wt))
+  
+}
+
+#####################################
+#Indel spectrum of matched read1 and read2
+#####################################
+
+doublecut_indelspectrum <- function(W, jt, jrv, samplesnames){
+  
+for(i in 1:length(W[[1]])){
+ df10 <- W[[jt]][[i]]
+ df11 <- W[[jrv]][[i]]
+
+ df12 <- df10[df10[,'V1'] %in% df11[,'V1'],] 
+ df13 <- df11[match(df12[,'V1'], df11[,'V1']),]
+ df14 <- cbind(df12, df13)
+ 
+  x <- table(df14[4])
+  y <- (x/nrow(df14[4])) *100
+  
+  x2 <- table(df14[9])
+  y2 <- (x2/nrow(df14[9])) *100
+    
+
+  shiftrange <- rownames(y)
+  indel.summary <- round(y,1)
+  
+  shiftrange2 <- rownames(y2)
+  indel.summary2 <- round(y2,1)
+  
+  if(length(shiftrange)==0){
+    shiftrange <- b_del <- b_ins <- 0
+  }
+  b_del <- abs(min(as.numeric(shiftrange)))
+  b_ins <- abs(max(as.numeric(shiftrange)))
+  
+  range <- c(-b_del:b_ins)
+  
+  A <- data.frame(indel=as.numeric(shiftrange), p=as.numeric(indel.summary))
+  B <- data.frame(indel=range)
+  C <- merge(A, B, all=TRUE)   
+  
+  COL <- "black"
+  COL[!C[, "indel"]==0] <- "#1874CD"
+  COL[C[, "indel"]==0] <- "#98F5FF"
+  
+  if(length(range)>1){
+  bp <- barplot(as.vector(C[,"p"]), 
+                main=paste("read", jt, samplesnames[i]),
+                col=COL, 
+                border = COL,
+                names.arg=range,
+                xlab="type of indel",
+                ylim=c(0, max(as.vector(C[,"p"]), na.rm=TRUE)+10), 
+                ylab="% of sequences")
+  
+  #above each group of bars: show percentage (mean across four bases)
+  text(bp[C[,"p"]>5], (C[,"p"]+5)[C[,"p"]>5], as.character(((round(C[,"p"],1))[C[,"p"]>5])))
+  
+  #display Rsq values as an indication of the accuracy:
+  
+  eff <- round((100) - as.vector( C[,"p"][C[, "indel"]==0]),1)
+  #cat("overall efficiency =", eff, "%\n")
+  
+  dl <- (C[,"indel"]<0)
+  insert <- (C[,"indel"]>0)
+  deletions <- sum(as.vector(C[dl,"p"]), na.rm=TRUE)
+  insertions <- sum(as.vector(C[insert,"p"]), na.rm=TRUE)
+  
+legend("topleft", legend=c(paste("total reads =",length(df14[,1]) )), bty="n")
+  }  
+
+if(length(shiftrange2)==0){
+    shiftrange2 <- b_del2 <- b_ins2 <- 0
+  }
+  b_del2 <- abs(min(as.numeric(shiftrange2)))
+  b_ins2 <- abs(max(as.numeric(shiftrange2)))
+  
+  range2 <- c(-b_del2:b_ins2)
+  
+  A <- data.frame(indel=as.numeric(shiftrange2), p=as.numeric(indel.summary2))
+  B <- data.frame(indel=range2)
+  C <- merge(A, B, all=TRUE)   
+  
+  COL <- "black"
+  COL[!C[, "indel"]==0] <- "#1874CD"
+  COL[C[, "indel"]==0] <- "#98F5FF"
+  
+  if(length(range2)>1){
+  bp <- barplot(as.vector(C[,"p"]), 
+                main=paste("read", jrv, samplesnames[i]),
+                col=COL, 
+                border = COL,
+                names.arg=range2,
+                xlab="type of indel",
+                ylim=c(0, max(as.vector(C[,"p"]), na.rm=TRUE)+10), 
+                ylab="% of sequences")
+  
+  #above each group of bars: show percentage (mean across four bases)
+  text(bp[C[,"p"]>5], (C[,"p"]+5)[C[,"p"]>5], as.character(((round(C[,"p"],1))[C[,"p"]>5])))
+  
+  #display Rsq values as an indication of the accuracy:
+  
+  eff <- round((100) - as.vector( C[,"p"][C[, "indel"]==0]),1)
+  #cat("overall efficiency =", eff, "%\n")
+  
+  dl <- (C[,"indel"]<0)
+  insert <- (C[,"indel"]>0)
+  deletions <- sum(as.vector(C[dl,"p"]), na.rm=TRUE)
+  insertions <- sum(as.vector(C[insert,"p"]), na.rm=TRUE)
+  
+legend("topleft", legend=c(paste("total reads =",length(df14[,1]) )), bty="n")
+  
+  }
+}
+
+}
+
+```
+
+<h3>Double cut</h3>
+
+```{r run function double cut}
+
+jt <- 1
+jrv <- 2
+
+samplesnames <- c("-guide", "2", "5", "25", "6", "26", "7", "27", "8", "28", "29") 
+
+#match read1 & read2
+M <- match_pairs(W, jt, jrv, samplesnames)
+
+ex_1 <- c(-117, -191, -174, -169, -309)
+
+je_0 <- c(1,2,3,5,7,9) #controls
+je_1 <- c(4) #sgRNA 2 & 5
+je_2 <- c(6) #sgRNA 2 & 6
+je_3 <- c(8) #sgRNA 2 & 7
+je_4 <- c(10) #sgRNA 2 & 8
+je_5 <- c(11) #sgRNA 2 & 9
+
+#determine mutation in the double cut experiments
+Db <- doublecut(je=c(4,6,8,10,11), P=M, ex=c(-117, -191, -174, -169, -309), samplesnames=c("25" ,"26", "27", "28", "29"))
+
+guide12_indel <- Db$guide12_del+Db$guide12_ins
+Db$guide1+Db$guide2+Db$guide12+Db$guide12_perfect+guide12_indel+Db$guide12_wt
+
+Db_matrix <- data.frame(guide=Db$guide1, guide2=Db$guide2, guide12=Db$guide12, guide12_perfect=Db$guide12_perfect, guide12_indel=guide12_indel, wt=Db$guide12_wt)
+
+bp_d <- barplot(t(Db_matrix), col=c("blue", "red", "green", "grey", "purple", "black"),
+        names=c("2_5", "2_6", "2_7", "2_8", "2_9"),
+        ylab="fraction/total (%)")
+
+
+tot_excised <- 100/(Db$guide12_perfect+guide12_indel)
+guide12_perfect_norm <- Db$guide12_perfect*tot_excised      
+guide12_indel_norm <- guide12_indel*tot_excised
+
+Db_matrix_norm <- data.frame(guide12_perfect_norm=guide12_perfect_norm, guide12_indel_norm=guide12_indel_norm)
+
+bp_d2 <- barplot(t(Db_matrix_norm), col=c("grey", "purple"),
+        names=c("2_5", "2_6", "2_7", "2_8", "2_9"),
+        ylab="fraction/total (%)")
+  
+```
+
+<h3>Double cut kinetics</h3>
+
+```{r Double cut kinetics}
+
+samples_series <- c("t10_2", "t10_2_c", "t10_8", "t10_8_c", "t10_28", "t10_28_c", "t10_2rv", "t10_2_crv", "t10_8rv", "t10_8_crv", "t10_28rv", "t10_28_crv", "t12_2", "t12_8", "t12_28","t12_2rv", "t12_8rv", "t12_28rv","t12_2_C", "t12_8_c", "t12_28_c", "t12_2_crv", "t12_8_crv", "t12_28_crv")
+
+js <- c(5, 15)
+jsrv <- c(11, 17)
+
+pLBR2 <- pLBR8 <- pLBR28 <- pLBR28_i <- pLBR28_p <- pLBR28_pi <- pLBR28_wt <- matrix(NA, nrow=length(time_all), ncol=length(js))
+
+for(k in 1:2){
+jt <- js[k]
+jrv <- jsrv[k]
+  
+LBR2 <- LBR8 <- LBR28 <- LBR28_i <- LBR28_p <- LBR28_pi <- LBR28_wt <- 0
+LBR2_b <- LBR8_b <- LBR28_b <- LBR28_i_b <- LBR28_p_b <- LBR28_pi_b <- LBR28_wt_b <- list()
+
+for(i in 1:length(W_order[[jt]])){
+ df10 <- W_order[[jt]][[i]]
+ df11 <- W_order[[jrv]][[i]]
+
+ df12 <- df10[df10[,'V1'] %in% df11[,'V1'],]
+ df13 <- df11[match(df12[,'V1'], df11[,'V1']),]
+ df14 <- cbind(df12, df13)
+ plot(df12[,'V4'], df13[,'V4'], pch=20, main=paste("timepoint", i), xlab="indelsize LBR8", ylab="indelsize LBR2")
+
+ 
+ a <- (df14[(df14[,4]!=0),])
+ b <- (a[(a[,9]==0),])
+LBR8_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR8[i] <- event/tot*100
+
+a <- (df14[(df14[,9]!=0),])
+b <- (a[(a[,4]==0),])
+LBR2_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR2[i] <-event/tot*100
+
+a <- (df14[(df14[,9]!=0 & df14[,9]>-169),])
+b <- (a[(a[,4]!=0 & a[,9]>-169),])
+LBR28_i_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR28_i[i] <-event/tot*100
+
+a <- (df14[(df14[,9]!=0 & df14[,9]==-169),])
+b <- (a[(a[,4]!=0 & a[,9]==-169),])
+LBR28_p_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR28_p[i] <-event/tot*100
+
+a <- (df14[(df14[,9]!=0 & df14[,9]<=-170),])
+b <- (a[(a[,4]!=0 & a[,9]<=-170),])
+LBR28_pi_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR28_pi[i] <-event/tot*100
+
+
+a <- (df14[(df14[,9]==0),])
+b <- (a[(a[,4]==0),])
+LBR28_wt_b[[i]] <- b
+tot <- length(df14[,1])
+event <- length(b[,1])
+LBR28_wt[i] <-event/tot*100
+
+barplot(c(LBR2[i], LBR8[i], LBR28_i[i], LBR28_p[i], LBR28_pi[i], LBR28_wt[i]), 
+        names=c("LBR2 only", "LBR8 only", "LBR2_8 indels both", "LBR2_8 perfect", "LBR2_8_not perfect", "LBR2_8_wt"),
+        ylab="% in the pool",
+        main=paste("timepoint", i))
+}
+
+LBR2+LBR8+LBR28_i+LBR28_p+LBR28_pi+LBR28_wt
+
+LBR2 <- LBR2-LBR2[1]
+LBR2[LBR2<=0] <- 0
+
+LBR8 <- LBR8-LBR8[1]
+LBR8[LBR8<=0] <- 0
+
+LBR28_i <- LBR28_i-LBR28_i[1]
+LBR28_i[LBR28_i<=0] <- 0
+
+LBR28_p <- LBR28_p-LBR28_p[1]
+LBR28_p[LBR28_p<=0] <- 0
+
+LBR28_pi <- LBR28_pi-LBR28_pi[1]
+LBR28_pi[LBR28_p<=0] <- 0
+
+tot <- LBR2+LBR8+LBR28_i+LBR28_p+LBR28_pi+LBR28_wt
+tot
+
+pLBR28_wt[,k] <- as.matrix((LBR28_wt/tot)*100)
+pLBR2[,k] <- as.matrix((LBR2/tot)*100)
+pLBR8[,k] <- as.matrix((LBR8/tot)*100)
+pLBR28_i[,k] <- as.matrix((LBR28_i/tot)*100)
+pLBR28_p[,k] <- as.matrix((LBR28_p/tot)*100)
+pLBR28_pi[,k] <- as.matrix((LBR28_pi/tot)*100)
+
+pLBR2[,k]+pLBR8[,k]+pLBR28_i[,k]+pLBR28_p[,k]+pLBR28_pi[,k]+pLBR28_wt[,k]
+
+
+plot(time_all, pLBR2[,k], ylim=c(0,100), pch=20, col=1)
+lines(time_all, pLBR8[,k], pch=20, col=2, type="p")
+lines(time_all, pLBR28_i[,k], pch=20, col=3, type="p")
+lines(time_all, pLBR28_p[,k], pch=20, col=4, type="p")
+lines(time_all, pLBR28_pi[,k], pch=20, col=5, type="p")
+lines(time_all, pLBR28_wt[,k], pch=20, col=6, type="p")
+
+legend("topright", legend=c("LBR2 only", "LBR8 only", "LBR2_8 indels both", "LBR2_8 perfect", "LBR2_8 imperfect", "LBR2_8_wt"), bty="n", pch=19, col=c(1,2,3,4,5, 6))
+
+plot(time_all, pLBR2[,k], ylim=c(0,100), pch=20, col=1)
+lines(time_all, pLBR8[,k], pch=20, col=2, type="p")
+lines(time_all, pLBR28_i[,k], pch=20, col=3, type="p")
+lines(time_all, (pLBR28_p[,k]+pLBR28_pi[,k]), pch=20, col=4, type="p")
+lines(time_all, pLBR28_wt[,k], pch=20, col=6, type="p")
+
+legend("topright", legend=c("LBR2 only", "LBR8 only", "LBR2_8 indels both", "LBR2_8 excised", "LBR2_8_wt"), bty="n", pch=19, col=c(1,2,3,4,6))
+}
+
+###
+
+pLBR2_ex <- pLBR28_p+pLBR28_pi
+mutations_d <- pLBR2+pLBR8+pLBR28_i+pLBR28_p+pLBR28_pi
+  
+#normalized to total indel
+norm_m <- 100
+norm2_m <- (norm_m/(as.matrix(mutations_d)[nrow(mutations_d),]))
+
+ppLBR2 <- matrix(NA, nrow=length(time_all), ncol=length(js))
+ppLBR8 <- matrix(NA, nrow=length(time_all), ncol=length(js))
+ppLBR28 <- matrix(NA, nrow=length(time_all), ncol=length(js))
+ppLBR2_ex <- matrix(NA, nrow=length(time_all), ncol=length(js))
+
+for (q in 1:length(js)){
+  ppLBR2[,q] <- as.matrix(pLBR2)[,q]*norm2_m[q]
+  ppLBR8[,q] <- as.matrix(pLBR8)[,q]*norm2_m[q]
+  ppLBR28[,q] <- as.matrix(pLBR28_i)[,q]*norm2_m[q]
+  ppLBR2_ex[,q] <- as.matrix(pLBR2_ex)[,q]*norm2_m[q]
+}
+
+rownames(ppLBR2) <- rownames(ppLBR2) <- rownames(ppLBR28) <- rownames(ppLBR2_ex) <- as.character(c(time_all))
+colnames(ppLBR2)<- colnames(ppLBR8) <- colnames(ppLBR28) <- colnames(ppLBR2_ex) <-  paste("index", js)
+
+
+wildtype_d <- matrix(NA, nrow=length(time_all), ncol=length(js))
+for (q in 1:length(js)){
+  wildtype_d[,q] <- 100-ppLBR2[,q]-ppLBR8[,q]-ppLBR28[,q]-ppLBR2_ex[,q]
+}
+rownames(wildtype_d)<-as.character(c(time_all))
+colnames(wildtype_d)<- paste("index", js)
+
+#plot
+mLBR2 <- data.frame(time=time_all, mean=rowMeans(ppLBR2), sd=apply(ppLBR2, 1, sd))
+mLBR8 <- data.frame(time=time_all, mean=rowMeans(ppLBR8), sd=apply(ppLBR8, 1, sd))
+mLBR28_i <- data.frame(time=time_all, mean=rowMeans(ppLBR28), sd=apply(ppLBR28, 1, sd))
+mLBR28_ex <- data.frame(time=time_all, mean=rowMeans(ppLBR2_ex), sd=apply(ppLBR2_ex, 1, sd))
+mLBR28_wt <- data.frame(time=time_all, mean=rowMeans(wildtype_d), sd=apply(wildtype_d, 1, sd))
+
+# fit untransfected fraction
+# sigmoidal function for wildtype_gompertz
+gompertz = function(params, x) {
+  1-(params[1] * exp(-params[2] * exp(-params[3]*x)))
+}
+
+# sigmoidal function for indels_gompertz
+gompertz_indels = function(params, x) {
+  (params[1] * exp(-params[2] * exp(-params[3]*x)))
+}
+
+df7 <- data.frame(time=time_all, wt=mLBR28_wt$mean,indel2=mLBR2$mean, indel8=mLBR8$mean, indel2_8=mLBR28_i$mean, excised=mLBR28_ex$mean)
+
+# fitting untransfected
+x=df7[,1];
+y=df7[,2];
+z=df7[,3];
+l=df7[,4]
+k=df7[,5]
+m=df7[,6]
+
+y <- y/100
+z <- z/100
+l <- l/100
+k <- k/100
+m <- m/100
+
+fitmodel <- nls(y~(1-(a * exp(-b * exp(-c * x)))), start=list(a=20,b=10,c=0.1))
+fitmodel_i2 <- nls(z~(a * exp(-b * exp(-c * x))), start=list(a=20,b=10,c=0.1))
+fitmodel_i8 <- nls(l~(a * exp(-b * exp(-c * x))), start=list(a=10,b=1,c=0.1))
+fitmodel_i28 <- nls(k~(a * exp(-b * exp(-c * x))), start=list(a=20,b=10,c=0.1))
+fitmodel_iex <- nls(m~(a * exp(-b * exp(-c * x))), start=list(a=20,b=10,c=0.1))
+
+library("Hmisc")
+plot(mLBR28_wt$time, mLBR28_wt$mean, type="n", ylim=c(0,100), xlim=c(0,60), xlab="time (h)", ylab="fraction in pool (%)", main="double")
+par(fg=1) 
+with (
+  data = mLBR28_wt
+  , expr = errbar(time, mean, mean+sd, mean-sd, add=T, pch=20, cap=.01, col=1)
+)
+
+lines(seq(0,max(df7[,1]),0.1),gompertz(coef(fitmodel),seq(0,max(df7[,1]),0.1))*100,lwd=2, col=1)
+
+lines(mLBR2$time, mLBR2$mean, type="n")
+par(fg=4) 
+with (
+  data = mLBR2
+  , expr = errbar(time, mean, mean+sd, mean-sd, add=T, pch=20, cap=.01, col=4)
+)
+
+lines(seq(0,max(df7[,1]),0.1),gompertz_indels(coef(fitmodel_i2),seq(0,max(df7[,1]),0.1))*100,lwd=2, col=4)
+
+
+lines(mLBR8$time, mLBR8$mean, type="n")
+par(fg=2) 
+with (
+  data = mLBR8
+  , expr = errbar(time, mean, mean+sd, mean-sd, add=T, pch=20, cap=.01, col=2)
+)
+
+lines(mLBR8$time, mLBR8$mean,lwd=2, col=2)
+
+lines(mLBR28_i$time, mLBR28_i$mean, type="n")
+par(fg=3) 
+with (
+  data = mLBR28_i
+  , expr = errbar(time, mean, mean+sd, mean-sd, add=T, pch=20, cap=.01, col=3)
+)
+
+lines(seq(0,max(df7[,1]),0.1),gompertz_indels(coef(fitmodel_i28),seq(0,max(df7[,1]),0.1))*100,lwd=2, col=3)
+
+lines(mLBR28_ex$time, mLBR28_ex$mean, type="n")
+par(fg=7) 
+with (
+  data = mLBR28_ex
+  , expr = errbar(time, mean, mean+sd, mean-sd, add=T, pch=20, cap=.01, col=7)
+)
+
+lines(seq(0,max(df7[,1]),0.1),gompertz_indels(coef(fitmodel_iex),seq(0,max(df7[,1]),0.1))*100,lwd=2, col=7)
+
+```
+
+<h3>Single cut versus Double cut</h3>
+
+```{r Single cut versus Double cut}
+
+ts_10_2 <- timeseriesplots(Y_order = Y_order, Z_order = Z_order, jt = 1, time_all = time_all)
+ts_12_2 <- timeseriesplots(Y_order = Y_order, Z_order = Z_order, jt = 13, time_all = time_all)
+
+ts_10_8 <- timeseriesplots(Y_order = Y_order, Z_order = Z_order, jt = 3, time_all = time_all)
+ts_12_8 <- timeseriesplots(Y_order = Y_order, Z_order = Z_order, jt = 14, time_all = time_all)
+
+index2 <- cbind(ts_10_2$mutations_tot, ts_12_2$mutations_tot)
+index8 <- cbind(ts_10_8$mutations_tot, ts_12_8$mutations_tot)
+
+for(k in 1:2){
+
+##LBR2 events
+plot(time_all, (pLBR2[,k]+pLBR28_i[,k]+pLBR28_p[,k]+pLBR28_pi[,k]), ylim=c(0,100), pch=20, col=1, xlab="time (h)", ylab="indels(%)")
+lines(time_all, index2[1:length(time_all),k], type='p', pch=20, col=2)
+
+legend("topleft", legend=c("LBR2 double", "LBR2 single"), bty="n", pch=19, col=c(1,2))
+
+##LBR8 events
+plot(time_all, (pLBR8[,k]+pLBR28_i[,k]+pLBR28_p[,k]+pLBR28_pi[,k]), ylim=c(0,100), pch=20, col=1, xlab="time (h)", ylab="indels(%)")
+lines(time_all, index8[1:length(time_all),k], type='p', pch=20, col=2)
+
+legend("topleft", legend=c("LBR8 double", "LBR8 single"), bty="n", pch=19, col=c(1,2))
+}
+
+```
+
+<h2>SessionInfo</h2>
+
+```{r sessioninfo}
+
+sessionInfo()
+
+```

@@ -1,6 +1,7 @@
 # DSB_Repair_Kinetics
-Scripts to analyze and model DNA double-strand break repair kinetics
+Scripts to analyze and model DNA double-strand break repair kinetics, see <https://www.biorxiv.org/content/early/2017/05/26/142802>.
 Eva Brinkman 20180328
+
 
 We uploaded 1 perl script, 3 R/Markdown .Rmd scripts and 2 zipfolders with data necessary for the scripts.
 
